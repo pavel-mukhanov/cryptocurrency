@@ -3,16 +3,11 @@ extern crate exonum_cryptocurrency as cryptocurrency;
 extern crate exonum_time;
 extern crate timestamp_service;
 
-use std::sync::Arc;
-use exonum::blockchain::{ApiContext, ExecutionResult, GenesisConfig, Service, Transaction,
-                         ValidatorKeys};
+use exonum::blockchain::{GenesisConfig, ValidatorKeys};
 use exonum::node::{Node, NodeApiConfig, NodeConfig};
-use exonum::messages::Message;
-use exonum::storage::{MapIndex, MemoryDB, Snapshot};
-use exonum::crypto::PublicKey;
-use exonum::helpers::fabric::NodeBuilder;
-use cryptocurrency::{CurrencyService, CurrencyServiceFactory};
-use exonum_time::{TimeService, TimeServiceFactory};
+use exonum::storage::{MemoryDB};
+use cryptocurrency::{CurrencyService};
+use exonum_time::{TimeService};
 use timestamp_service::TimestampService;
 
 fn node_config() -> NodeConfig {

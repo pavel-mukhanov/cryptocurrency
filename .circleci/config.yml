@@ -5,7 +5,7 @@ jobs:
     docker:
       - image: rust:latest
     environment:
-      - ROCKSDB_LIB_DIR: $HOME/rocksdb
+      - ROCKSDB_LIB_DIR: /root/project/rocksdb
       - SNAPPY_LIB_DIR: /usr/local/lib
       - RUSTFLAGS: -D warnings
     steps:

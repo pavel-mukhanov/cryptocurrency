@@ -2,8 +2,8 @@ version: 2
 
 jobs:
   build_and_test:
-    macos:
-      xcode: "9.0"
+    docker:
+      - image: abronan/rust-circleci:latest
     environment:
       - ROCKSDB_LIB_DIR: /usr/local/lib
       - SNAPPY_LIB_DIR: /usr/local/lib

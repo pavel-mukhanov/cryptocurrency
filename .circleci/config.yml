@@ -9,9 +9,7 @@ jobs:
           name: stable build
           no_output_timeout: 3600
           command: |
-            rustup run stable rustc --version --verbose
-            rustup run stable cargo --version --verbose
-            rustup run stable cargo build
+            cargo build
       - run:
           name: test  
           command: cargo test

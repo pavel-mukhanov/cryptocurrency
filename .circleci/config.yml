@@ -15,6 +15,7 @@ jobs:
             - cache-{{ arch }}-{{ .Branch }}
       - run: curl https://sh.rustup.rs -sSf | sh -s -- -y
       - run: echo 'export PATH=~/.cargo/bin:$PATH' >> $BASH_ENV
+      - run: apt-get update
       - run: apt-get install libsnappy-dev
       - run: rustup show
       - run: cargo build

@@ -20,9 +20,9 @@ jobs:
       - run: apt-get install -y libgflags-dev libsnappy-dev zlib1g-dev libbz2-dev libzstd-dev
       - run: git clone https://github.com/facebook/rocksdb
       - run: | 
-        if [ ! -f "$HOME/rocksdb/librocksdb.a" ]; then
-          cd rocksdb/ && make static_lib
-        fi  
+          if [ ! -f "$HOME/rocksdb/librocksdb.a" ]; then
+            cd rocksdb/ && make static_lib
+          fi  
       - save_cache:
           key: cache-{{ arch }}-{{ .Branch }}
           paths:

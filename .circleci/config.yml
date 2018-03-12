@@ -5,7 +5,7 @@ jobs:
     docker:
       - image: rust:latest
     environment:
-      - ROCKSDB_LIB_DIR: /usr/local/lib
+      - ROCKSDB_LIB_DIR: $HOME/rocksdb
       - SNAPPY_LIB_DIR: /usr/local/lib
       - RUSTFLAGS: -D warnings
     steps:
@@ -24,7 +24,6 @@ jobs:
           key: cache-{{ arch }}-{{ .Branch }}
           paths:
             - $HOME/rocksdb
-      - run: export ROCKSDB_LIB_DIR=$HOME/rocksdb
       - run: rustup show
       - run: env
       - run: cargo build

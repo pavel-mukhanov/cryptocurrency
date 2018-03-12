@@ -3,7 +3,7 @@ version: 2
 jobs:
   build_and_test:
     docker:
-      - image: rust:latest
+      - image: ubuntu:trusty
     environment:
       - ROCKSDB_LIB_DIR: /usr/local/lib
       - SNAPPY_LIB_DIR: /usr/local/lib
@@ -15,6 +15,7 @@ jobs:
             - cache-{{ arch }}-{{ .Branch }}
       - run: curl https://sh.rustup.rs -sSf | sh -s -- -y
       - run: echo 'export PATH=~/.cargo/bin:$PATH' >> $BASH_ENV
+      - run: apt-get install libsnappy-dev
       - run: rustup show
       - run: cargo build
       - run: cargo test

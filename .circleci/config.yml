@@ -3,7 +3,7 @@ version: 2
 jobs:
   build_and_test:
     docker:
-      - image: abronan/rust-circleci:latest
+      - image: rust:latest
     environment:
       - ROCKSDB_LIB_DIR: /usr/local/lib
       - SNAPPY_LIB_DIR: /usr/local/lib
@@ -16,7 +16,6 @@ jobs:
       - run: curl https://sh.rustup.rs -sSf | sh -s -- -y
       - run: echo 'export PATH=~/.cargo/bin:$PATH' >> $BASH_ENV
       - run: rustup show
-      - run: brew install libsodium rocksdb pkg-config
       - run: cargo build
       - run: cargo test
       - save_cache:

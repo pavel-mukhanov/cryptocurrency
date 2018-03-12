@@ -1,0 +1,13 @@
+version: 2
+jobs:
+  build:
+    docker:
+      - image: abronan/rust-circleci:latest
+    steps:
+      - checkout
+      - run:
+          name: stable build
+          command: cargo build
+      - run:
+          name: test  
+          command: cargo test

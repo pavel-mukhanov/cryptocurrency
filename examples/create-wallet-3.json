@@ -1,0 +1,10 @@
+{
+  "body": {
+    "name": "Paul",
+    "pub_key": "a7241c9dc73ad0c09a9c360efec966b1079aecd76b7fbeb12eb0d0422e8c9d55"
+  },
+  "message_id": 0,
+  "protocol_version": 0,
+  "service_id": 1,
+  "signature": "39e44c4469170702b6962bdf8d589e5a80805bb218018c5500caa77416ee20a59fde3901a513488dda5b20414b33b3904f732198c02a59bd7832d0c777ee220b"
+}

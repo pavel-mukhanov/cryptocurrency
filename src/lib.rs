@@ -1,4 +1,4 @@
-// Copyright 2017 The Exonum Team
+// Copyright 2018 The Exonum Team
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,14 +23,13 @@
 //! [docs]: https://exonum.com/doc/get-started/create-service
 //! [readme]: https://github.com/exonum/cryptocurrency#readme
 
-#![deny(missing_docs)]
-
 // Import crates with necessary types into a new project.
 
 extern crate bodyparser;
 #[macro_use]
 extern crate exonum;
-extern crate exonum_time;
+#[macro_use]
+extern crate failure;
 extern crate iron;
 extern crate router;
 extern crate serde;
@@ -40,23 +39,23 @@ extern crate serde_json;
 
 // Import necessary types from crates.
 
-use exonum::blockchain::{ApiContext, Blockchain, ExecutionResult, Service, Transaction,
-                         TransactionSet};
+use exonum::blockchain::{ApiContext, Blockchain, ExecutionError, ExecutionResult, Service,
+                         Transaction, TransactionSet};
 use exonum::encoding::serialize::FromHex;
+use exonum::encoding::serialize::json::ExonumJson;
 use exonum::node::{ApiSender, TransactionSend};
 use exonum::messages::{Message, RawTransaction};
 use exonum::storage::{Fork, MapIndex, Snapshot};
 use exonum::crypto::{Hash, PublicKey};
 use exonum::encoding;
 use exonum::api::{Api, ApiError};
-use exonum::helpers::fabric::{Context, ServiceFactory};
 use iron::prelude::*;
 use iron::Handler;
 use iron::status::Status;
 use iron::headers::ContentType;
 use iron::modifiers::Header;
 use router::Router;
-use std::time::SystemTime;
+use exonum::crypto::{self, SecretKey};
 
 // // // // // // // // // // CONSTANTS // // // // // // // // // //
 
@@ -82,8 +81,6 @@ encoding_struct! {
         name: &str,
         /// Current balance.
         balance: u64,
-        /// Latest transaction time
-        time: SystemTime,
     }
 }
 
@@ -92,19 +89,14 @@ impl Wallet {
     /// Returns a copy of this wallet with the balance increased by the specified amount.
     pub fn increase(self, amount: u64) -> Self {
         let balance = self.balance() + amount;
-        Self::new(self.pub_key(), self.name(), balance, SystemTime::now())
+        Self::new(self.pub_key(), self.name(), balance)
     }
 
     /// Returns a copy of this wallet with the balance decreased by the specified amount.
     pub fn decrease(self, amount: u64) -> Self {
         debug_assert!(self.balance() >= amount);
         let balance = self.balance() - amount;
-        Self::new(self.pub_key(), self.name(), balance, SystemTime::now())
-    }
-
-    /// Set transaction time
-    pub fn set_time(self, time: &SystemTime) -> Self {
-        Self::new(self.pub_key(), self.name(), self.balance(), *time)
+        Self::new(self.pub_key(), self.name(), balance)
     }
 }
 
@@ -182,6 +174,43 @@ transactions! {
     }
 }
 
+// // // // // // // // // // CONTRACT ERRORS // // // // // // // // // //
+
+/// Error codes emitted by `TxCreateWallet` and/or `TxTransfer` transactions during execution.
+#[derive(Debug, Fail)]
+#[repr(u8)]
+pub enum Error {
+    /// Wallet already exists.
+    ///
+    /// Can be emitted by `TxCreateWallet`.
+    #[fail(display = "Wallet already exists")]
+    WalletAlreadyExists = 0,
+
+    /// Sender doesn't exist.
+    ///
+    /// Can be emitted by `TxTransfer`.
+    #[fail(display = "Sender doesn't exist")]
+    SenderNotFound = 1,
+
+    /// Receiver doesn't exist.
+    ///
+    /// Can be emitted by `TxTransfer`.
+    #[fail(display = "Receiver doesn't exist")]
+    ReceiverNotFound = 2,
+
+    /// Insufficient currency amount.
+    ///
+    /// Can be emitted by `TxTransfer`.
+    #[fail(display = "Insufficient currency amount")]
+    InsufficientCurrencyAmount = 3,
+}
+
+impl From<Error> for ExecutionError {
+    fn from(value: Error) -> ExecutionError {
+        ExecutionError::new(value as u8)
+    }
+}
+
 // // // // // // // // // // CONTRACTS // // // // // // // // // //
 
 impl Transaction for TxCreateWallet {
@@ -197,11 +226,13 @@ impl Transaction for TxCreateWallet {
     fn execute(&self, view: &mut Fork) -> ExecutionResult {
         let mut schema = CurrencySchema::new(view);
         if schema.wallet(self.pub_key()).is_none() {
-            let wallet = Wallet::new(self.pub_key(), self.name(), INIT_BALANCE, SystemTime::now());
+            let wallet = Wallet::new(self.pub_key(), self.name(), INIT_BALANCE);
             println!("Create the wallet: {:?}", wallet);
             schema.wallets_mut().put(self.pub_key(), wallet);
+            Ok(())
+        } else {
+            Err(Error::WalletAlreadyExists)?
         }
-        Ok(())
     }
 }
 
@@ -219,30 +250,30 @@ impl Transaction for TxTransfer {
     ///
     /// [`TxCreateWallet`]: struct.TxCreateWallet.html
     fn execute(&self, view: &mut Fork) -> ExecutionResult {
-        let time = {
-            let time_schema = exonum_time::TimeSchema::new(&view);
-            time_schema.time().get()
+        let mut schema = CurrencySchema::new(view);
+
+        let sender = match schema.wallet(self.from()) {
+            Some(val) => val,
+            None => Err(Error::SenderNotFound)?,
         };
 
-        println!("time {:?}", time);
+        let receiver = match schema.wallet(self.to()) {
+            Some(val) => val,
+            None => Err(Error::ReceiverNotFound)?,
+        };
 
-        let mut schema = CurrencySchema::new(view);
-        let sender = schema.wallet(self.from());
-        let receiver = schema.wallet(self.to());
-        if let (Some(sender), Some(receiver)) = (sender, receiver) {
-            let amount = self.amount();
-            if sender.balance() >= amount {
-                let sender = sender.decrease(amount);
-                let receiver = receiver.increase(amount);
-                let mut wallets = schema.wallets_mut();
-                let sender = sender.set_time(&time.unwrap());
-                let receiver = receiver.set_time(&time.unwrap());
-                println!("Transfer between wallets: {:?} => {:?}", sender, receiver);
-                wallets.put(self.from(), sender);
-                wallets.put(self.to(), receiver);
-            }
+        let amount = self.amount();
+        if sender.balance() >= amount {
+            let sender = sender.decrease(amount);
+            let receiver = receiver.increase(amount);
+            println!("Transfer between wallets: {:?} => {:?}", sender, receiver);
+            let mut wallets = schema.wallets_mut();
+            wallets.put(self.from(), sender);
+            wallets.put(self.to(), receiver);
+            Ok(())
+        } else {
+            Err(Error::InsufficientCurrencyAmount)?
         }
-        Ok(())
     }
 }
 
@@ -293,12 +324,40 @@ impl CryptocurrencyApi {
 
     /// Endpoint for dumping all wallets from the storage.
     fn get_wallets(&self, _: &mut Request) -> IronResult<Response> {
+        let (public_key, secret_key) = crypto::gen_keypair();
+        let tx = TxCreateWallet::new(&public_key, "Paul", &secret_key);    
+
+        println!("{}", serde_json::to_string_pretty(&tx.serialize_field().unwrap()).unwrap());
+
         let snapshot = self.blockchain.snapshot();
         let schema = CurrencySchema::new(snapshot);
         let idx = schema.wallets();
         let wallets: Vec<Wallet> = idx.values().collect();
 
         self.ok_response(&serde_json::to_value(&wallets).unwrap())
+    }
+
+    fn transfer(&self, _: &mut Request) -> IronResult<Response> {
+        let from = PublicKey::from_hex("3fc6dad512a26ddaefb24f1f4187dccb21c182a217cf7fdc356e02a008aba30c").unwrap();
+        let to = PublicKey::from_hex("848b442d3fefb48ff35b82e74cfed1bcb3e52f13909a21411f3bc2ff28e9f843").unwrap();
+        let secret_key = SecretKey::from_hex("5ae4d23de022d5f6f8831e7afe995c678436dafc3570dfe2fbacc07d8a34c2d53fc6dad512a26ddaefb24f1f4187dccb21c182a217cf7fdc356e02a008aba30c").unwrap();
+        let tx = TxTransfer::new(&from, &to, 15, 0u64, &secret_key);    
+
+        // println!("{}", serde_json::to_string_pretty(&tx.serialize_field().unwrap()).unwrap());
+
+        self.ok_response(&serde_json::to_value(&tx.serialize_field().unwrap()).unwrap())
+
+    }
+
+    fn get_tx(&self, req: &mut Request) -> IronResult<Response> {
+        let path = req.url.path();
+        let name = path.last().unwrap();
+        let (public_key, secret_key) = crypto::gen_keypair();
+        let tx = TxCreateWallet::new(&public_key, name, &secret_key); 
+
+        println!("secret key {}", secret_key.to_hex());
+
+        self.ok_response(&serde_json::to_value(&tx.serialize_field().unwrap()).unwrap())
     }
 
     /// Common processing for transaction-accepting endpoints.
@@ -332,12 +391,18 @@ impl Api for CryptocurrencyApi {
         let get_wallets = move |req: &mut Request| self_.get_wallets(req);
         let self_ = self.clone();
         let get_wallet = move |req: &mut Request| self_.get_wallet(req);
+        let self_ = self.clone();
+        let get_tx = move |req: &mut Request| self_.get_tx(req);
+        let self_ = self.clone();
+        let transfer = move |req: &mut Request| self_.transfer(req);
 
         // Bind handlers to specific routes.
         router.post("/v1/wallets", post_create_wallet, "post_create_wallet");
         router.post("/v1/wallets/transfer", post_transfer, "post_transfer");
         router.get("/v1/wallets", get_wallets, "get_wallets");
         router.get("/v1/wallet/:pub_key", get_wallet, "get_wallet");
+        router.get("/v1/wallet/get_tx/:name", get_tx, "get_tx");
+        router.get("/v1/wallet/transfer", transfer, "transfer");
     }
 }
 
@@ -383,12 +448,6 @@ impl Api for CryptocurrencyApi {
 /// [`TxTransfer`]: struct.TxTransfer.html
 pub struct CurrencyService;
 
-impl Default for CurrencyService {
-    fn default() -> CurrencyService {
-        CurrencyService
-    }
-}
-
 impl Service for CurrencyService {
     fn service_name(&self) -> &'static str {
         "cryptocurrency"
@@ -422,14 +481,5 @@ impl Service for CurrencyService {
         };
         api.wire(&mut router);
         Some(Box::new(router))
-    }
-}
-
-///
-pub struct CurrencyServiceFactory;
-
-impl ServiceFactory for CurrencyServiceFactory {
-    fn make_service(&mut self, _: &Context) -> Box<Service> {
-        Box::new(CurrencyService)
     }
 }
